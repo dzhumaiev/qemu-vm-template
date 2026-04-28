@@ -1,0 +1,34 @@
+WAN_INT='enp0s31f6'
+LAN_INT='vmbr0'
+LAN_NET='10.1.0.0/24'
+EXT_PORT='3389'
+DST_PORT='3389'
+DST_IP='10.1.0.100'
+
+# block some TCP attack paterns
+iptables -t raw -I PREROUTING 1 -p tcp --tcp-flags FIN,SYN FIN,SYN -j DROP
+iptables -t raw -I PREROUTING 2 -p tcp --tcp-flags SYN,RST SYN,RST -j DROP
+iptables -t raw -I PREROUTING 3 -p tcp --tcp-flags FIN,SYN,RST,PSH,ACK,URG FIN,PSH,URG -j DROP
+iptables -t raw -I PREROUTING 4 -p tcp --tcp-flags FIN,SYN,RST,PSH,ACK,URG FIN -j DROP
+iptables -t raw -I PREROUTING 5 -p tcp --tcp-flags FIN,SYN,RST,PSH,ACK,URG NONE -j DROP
+iptables -t raw -I PREROUTING 6 -p tcp --tcp-flags FIN,SYN,RST,PSH,ACK,URG FIN,SYN,RST,PSH,ACK,URG -j DROP
+
+# input for HOST
+iptables -I INPUT 1 -m state --state INVALID -j DROP
+iptables -I INPUT 2 -m state --state ESTABLISHED,RELATED -j ACCEPT
+iptables -I INPUT 3 -i lo -j ACCEPT
+iptables -A INPUT -p tcp --dport 8006 -j ACCEPT
+iptables -A INPUT -p tcp --dport 22 -j ACCEPT
+iptables -P INPUT DROP
+
+# basic routing
+iptables -I FORWARD 1 -p all -m state --state ESTABLISHED,RELATED -j ACCEPT
+iptables -I FORWARD 2 -i $LAN_INT -o $WAN_INT -s $LAN_NET -j ACCEPT
+iptables -I FORWARD 3 -i $WAN_INT -o $LAN_INT -d $LAN_NET -j ACCEPT
+iptables -P FORWARD DROP
+
+# port forwarding
+iptables -t nat -A PREROUTING -p tcp -i $WAN_INT --dport $EXT_PORT -j DNAT  --to-destination $DST_IP:$DST_PORT
+
+# enable NAt masquerading mode
+iptables -t nat -A POSTROUTING -s $LAN_NET -o $WAN_INT -j MASQUERADE
