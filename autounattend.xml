@@ -1,0 +1,326 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  autounattend.xml — Unattended answer file for Windows Server 2022
+  Used by create-win2022-template.sh to build a Proxmox VM template.
+
+  Installs: Windows Server 2022 Standard (Desktop Experience)
+  Hardware:  Proxmox q35 machine, UEFI/OVMF, VirtIO SCSI disk, VirtIO NIC
+
+  The string __ADMIN_PASSWORD__ is replaced at runtime by create-win2022-template.sh
+  with the value supplied via the -p flag.
+
+  Notes:
+  - VirtIO storage drivers are loaded during WindowsPE so the installer can see
+    the VirtIO SCSI disk. Paths for drive letters D–G are listed because Windows
+    assigns letters dynamically depending on ISO attach order.
+  - The VirtIO guest tools MSI (which includes the QEMU guest agent) is found
+    by scanning all CD-ROM volumes at first logon.
+  - A reboot is triggered at the end of first-logon commands so the VM boots
+    cleanly with the guest agent running before create-win2022-template.sh
+    converts it to a template.
+-->
+<unattend xmlns="urn:schemas-microsoft-com:unattend">
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       Pass 1 — windowsPE
+       Inject VirtIO storage drivers so Windows Setup can see the disk,
+       then partition the disk and install the OS image.
+       ═══════════════════════════════════════════════════════════════════════ -->
+  <settings pass="windowsPE">
+
+    <component name="Microsoft-Windows-PnpCustomizationsWinPE"
+               processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35"
+               language="neutral"
+               versionScope="nonSxS"
+               xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+      <!--
+        Scan drive letters D through G for the VirtIO storage driver.
+        Windows skips paths that do not exist, so listing extras is harmless.
+        The VirtIO ISO directory layout is: <drive>:\viostor\2k22\amd64
+        and (for SCSI):                     <drive>:\vioscsi\2k22\amd64
+      -->
+      <DriverPaths>
+        <PathAndCredentials wcm:action="add" wcm:keyValue="1">
+          <Path>D:\viostor\2k22\amd64</Path>
+        </PathAndCredentials>
+        <PathAndCredentials wcm:action="add" wcm:keyValue="2">
+          <Path>E:\viostor\2k22\amd64</Path>
+        </PathAndCredentials>
+        <PathAndCredentials wcm:action="add" wcm:keyValue="3">
+          <Path>F:\viostor\2k22\amd64</Path>
+        </PathAndCredentials>
+        <PathAndCredentials wcm:action="add" wcm:keyValue="4">
+          <Path>G:\viostor\2k22\amd64</Path>
+        </PathAndCredentials>
+        <PathAndCredentials wcm:action="add" wcm:keyValue="5">
+          <Path>D:\vioscsi\2k22\amd64</Path>
+        </PathAndCredentials>
+        <PathAndCredentials wcm:action="add" wcm:keyValue="6">
+          <Path>E:\vioscsi\2k22\amd64</Path>
+        </PathAndCredentials>
+        <PathAndCredentials wcm:action="add" wcm:keyValue="7">
+          <Path>F:\vioscsi\2k22\amd64</Path>
+        </PathAndCredentials>
+        <PathAndCredentials wcm:action="add" wcm:keyValue="8">
+          <Path>G:\vioscsi\2k22\amd64</Path>
+        </PathAndCredentials>
+      </DriverPaths>
+    </component>
+
+    <component name="Microsoft-Windows-Setup"
+               processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35"
+               language="neutral"
+               versionScope="nonSxS"
+               xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+
+      <!--
+        UEFI partition layout:
+          Partition 1 — EFI System Partition (100 MB, FAT32)
+          Partition 2 — Microsoft Reserved    (16 MB)
+          Partition 3 — Windows OS            (rest of disk, NTFS, C:)
+      -->
+      <DiskConfiguration>
+        <WillShowUI>OnError</WillShowUI>
+        <Disk wcm:action="add">
+          <DiskID>0</DiskID>
+          <WillWipeDisk>true</WillWipeDisk>
+          <CreatePartitions>
+            <CreatePartition wcm:action="add">
+              <Order>1</Order>
+              <Type>EFI</Type>
+              <Size>100</Size>
+            </CreatePartition>
+            <CreatePartition wcm:action="add">
+              <Order>2</Order>
+              <Type>MSR</Type>
+              <Size>16</Size>
+            </CreatePartition>
+            <CreatePartition wcm:action="add">
+              <Order>3</Order>
+              <Type>Primary</Type>
+              <Extend>true</Extend>
+            </CreatePartition>
+          </CreatePartitions>
+          <ModifyPartitions>
+            <ModifyPartition wcm:action="add">
+              <Order>1</Order>
+              <PartitionID>1</PartitionID>
+              <Label>EFI</Label>
+              <Format>FAT32</Format>
+            </ModifyPartition>
+            <ModifyPartition wcm:action="add">
+              <Order>2</Order>
+              <PartitionID>2</PartitionID>
+            </ModifyPartition>
+            <ModifyPartition wcm:action="add">
+              <Order>3</Order>
+              <PartitionID>3</PartitionID>
+              <Label>Windows</Label>
+              <Format>NTFS</Format>
+              <Letter>C</Letter>
+            </ModifyPartition>
+          </ModifyPartitions>
+        </Disk>
+      </DiskConfiguration>
+
+      <ImageInstall>
+        <OSImage>
+          <!--
+            Image index 2 = Windows Server 2022 Standard (Desktop Experience).
+            Index 1 = Standard Core, 3 = Datacenter Core, 4 = Datacenter Desktop.
+            Change Value to 4 for Datacenter (Desktop Experience).
+          -->
+          <InstallFrom>
+            <MetaData wcm:action="add">
+              <Key>/IMAGE/INDEX</Key>
+              <Value>2</Value>
+            </MetaData>
+          </InstallFrom>
+          <InstallTo>
+            <DiskID>0</DiskID>
+            <PartitionID>3</PartitionID>
+          </InstallTo>
+          <WillShowUI>OnError</WillShowUI>
+        </OSImage>
+      </ImageInstall>
+
+      <UserData>
+        <!--
+          KMS client setup key for Windows Server 2022 Standard.
+          Source: https://learn.microsoft.com/en-us/windows-server/get-started/kms-client-activation-keys
+          This generic key requires a KMS server to activate.
+          Replace with your own volume license or evaluation key if needed.
+        -->
+        <ProductKey>
+          <Key>VDYBN-27WPP-V4HQT-9VMD4-VMK7H</Key>
+          <WillShowUI>OnError</WillShowUI>
+        </ProductKey>
+        <AcceptEula>true</AcceptEula>
+        <FullName>Administrator</FullName>
+        <Organization>Organization</Organization>
+      </UserData>
+
+    </component>
+  </settings>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       Pass 4 — specialize
+       Set hostname, time zone, and enable Remote Desktop / WinRM firewall rules.
+       ═══════════════════════════════════════════════════════════════════════ -->
+  <settings pass="specialize">
+
+    <component name="Microsoft-Windows-Shell-Setup"
+               processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35"
+               language="neutral"
+               versionScope="nonSxS"
+               xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+      <ComputerName>WIN2022-TEMPLATE</ComputerName>
+      <TimeZone>UTC</TimeZone>
+    </component>
+
+    <!-- Allow Remote Desktop connections -->
+    <component name="Microsoft-Windows-TerminalServices-LocalSessionManager"
+               processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35"
+               language="neutral"
+               versionScope="nonSxS">
+      <fDenyTSConnections>false</fDenyTSConnections>
+    </component>
+
+    <!-- Open Remote Desktop firewall rule -->
+    <component name="Networking-MPSSVC-Svc"
+               processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35"
+               language="neutral"
+               versionScope="nonSxS"
+               xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+      <FirewallGroups>
+        <FirewallGroup wcm:action="add" wcm:keyValue="RemoteDesktop">
+          <Active>true</Active>
+          <Group>Remote Desktop</Group>
+          <Profile>all</Profile>
+        </FirewallGroup>
+      </FirewallGroups>
+    </component>
+
+  </settings>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       Pass 7 — oobeSystem
+       Suppress all OOBE prompts, set Administrator password, and run
+       first-logon provisioning commands (VirtIO tools, WinRM, reboot).
+       ═══════════════════════════════════════════════════════════════════════ -->
+  <settings pass="oobeSystem">
+
+    <component name="Microsoft-Windows-Shell-Setup"
+               processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35"
+               language="neutral"
+               versionScope="nonSxS"
+               xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+
+      <OOBE>
+        <HideEULAPage>true</HideEULAPage>
+        <HideOEMRegistrationScreen>true</HideOEMRegistrationScreen>
+        <HideLocalAccountScreen>true</HideLocalAccountScreen>
+        <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
+        <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
+        <NetworkLocation>Work</NetworkLocation>
+        <ProtectYourPC>3</ProtectYourPC>
+        <SkipMachineOOBE>true</SkipMachineOOBE>
+        <SkipUserOOBE>true</SkipUserOOBE>
+      </OOBE>
+
+      <UserAccounts>
+        <!-- __ADMIN_PASSWORD__ is substituted by create-win2022-template.sh -->
+        <AdministratorPassword>
+          <Value>__ADMIN_PASSWORD__</Value>
+          <PlainText>true</PlainText>
+        </AdministratorPassword>
+      </UserAccounts>
+
+      <!--
+        Commands run once on the Administrator's first logon.
+        Steps:
+          1. Install VirtIO guest tools from the VirtIO ISO (includes QEMU guest agent,
+             balloon driver, NetKVM NIC driver, etc.).  The PowerShell script scans all
+             volumes for the MSI so the ISO drive letter does not need to be hardcoded.
+          2. Enable the QEMU guest agent service for automatic startup.
+          3. Enable WinRM so Proxmox / Ansible can reach the VM over the network.
+          4. Open the WinRM firewall port.
+          5. Disable automatic Windows Update (prevents template drift).
+          6. Reboot so the guest agent is fully running before the Proxmox host
+             converts the VM to a template.
+      -->
+      <FirstLogonCommands>
+
+        <SynchronousCommand wcm:action="add">
+          <Order>1</Order>
+          <Description>Install VirtIO guest tools (includes QEMU guest agent)</Description>
+          <CommandLine>powershell.exe -NonInteractive -Command "
+            $msi = Get-Volume |
+              Where-Object { $_.DriveLetter -and (Test-Path ($_.DriveLetter + ':\virtio-win-gt-x64.msi')) } |
+              Select-Object -First 1 |
+              ForEach-Object { $_.DriveLetter + ':\virtio-win-gt-x64.msi' };
+            if ($msi) {
+              Start-Process msiexec.exe -ArgumentList '/i', $msi, '/quiet', '/norestart', 'ADDLOCAL=ALL' -Wait
+            } else {
+              Write-Error 'virtio-win-gt-x64.msi not found on any volume'
+            }
+          "</CommandLine>
+          <RequiresUserInput>false</RequiresUserInput>
+        </SynchronousCommand>
+
+        <SynchronousCommand wcm:action="add">
+          <Order>2</Order>
+          <Description>Set QEMU guest agent service to automatic start</Description>
+          <CommandLine>cmd /c sc config QEMU-GA start= auto</CommandLine>
+          <RequiresUserInput>false</RequiresUserInput>
+        </SynchronousCommand>
+
+        <SynchronousCommand wcm:action="add">
+          <Order>3</Order>
+          <Description>Enable WinRM for remote management</Description>
+          <CommandLine>powershell.exe -NonInteractive -Command "Enable-PSRemoting -Force; Set-Service WinRM -StartupType Automatic"</CommandLine>
+          <RequiresUserInput>false</RequiresUserInput>
+        </SynchronousCommand>
+
+        <SynchronousCommand wcm:action="add">
+          <Order>4</Order>
+          <Description>Open WinRM HTTP firewall port</Description>
+          <CommandLine>powershell.exe -NonInteractive -Command "
+            if (-not (Get-NetFirewallRule -Name 'WinRM-HTTP-In-TCP' -ErrorAction SilentlyContinue)) {
+              New-NetFirewallRule -Name 'WinRM-HTTP-In-TCP' -DisplayName 'WinRM HTTP' `
+                -Enabled True -Direction Inbound -Protocol TCP -LocalPort 5985 -Action Allow
+            }
+          "</CommandLine>
+          <RequiresUserInput>false</RequiresUserInput>
+        </SynchronousCommand>
+
+        <SynchronousCommand wcm:action="add">
+          <Order>5</Order>
+          <Description>Disable automatic Windows Update (prevents template drift)</Description>
+          <CommandLine>powershell.exe -NonInteractive -Command "
+            $path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU';
+            if (-not (Test-Path $path)) { New-Item -Path $path -Force | Out-Null };
+            Set-ItemProperty -Path $path -Name 'NoAutoUpdate' -Value 1 -Type DWord -Force
+          "</CommandLine>
+          <RequiresUserInput>false</RequiresUserInput>
+        </SynchronousCommand>
+
+        <SynchronousCommand wcm:action="add">
+          <Order>6</Order>
+          <Description>Reboot to apply VirtIO drivers and start guest agent cleanly</Description>
+          <CommandLine>cmd /c shutdown /r /f /t 10</CommandLine>
+          <RequiresUserInput>false</RequiresUserInput>
+        </SynchronousCommand>
+
+      </FirstLogonCommands>
+
+    </component>
+  </settings>
+
+</unattend>
